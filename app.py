@@ -67,7 +67,7 @@ def pretext():
             )
         # write source to file temp_dir/source.ptx
         (temp_dir/"source.ptx").write_text(assembled_source)
-        # write publication to file temp_dir/source.ptx
+        # write publication to file temp_dir/publication.ptx
         (temp_dir/"publication.ptx").write_text(render_template(
             "publication.ptx",
         ))
