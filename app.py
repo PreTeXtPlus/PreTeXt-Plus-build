@@ -57,7 +57,7 @@ def pretext():
         # edit out any xml manifest
         source = re.sub(r'<\?xml.*\?>','', source)
         # assemble source if needed:
-        if source.lstrip().startswith("<pretext>"):
+        if re.match(r"<pretext\b", source.lstrip()):
             assembled_source = source
         else:
             assembled_source = render_template(
