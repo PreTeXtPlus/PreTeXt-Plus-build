@@ -56,13 +56,19 @@ def pretext():
         source = request.form.get('source')
         # edit out any xml manifest
         source = re.sub(r'<\?xml.*\?>','', source)
+        if re.match(r"<pretext\b", source.lstrip()):
+            # use source as-is
+            assembled_source = source
+        else:
+            # assemble source from template
+            assembled_source = render_template(
+                "source.ptx",
+                source=source,
+                title=request.form.get('title'),
+            )
         # write source to file temp_dir/source.ptx
-        (temp_dir/"source.ptx").write_text(render_template(
-            "source.ptx",
-            source=source,
-            title=request.form.get('title'),
-        ))
-        # write publication to file temp_dir/source.ptx
+        (temp_dir/"source.ptx").write_text(assembled_source)
+        # write publication to file temp_dir/publication.ptx
         (temp_dir/"publication.ptx").write_text(render_template(
             "publication.ptx",
         ))
