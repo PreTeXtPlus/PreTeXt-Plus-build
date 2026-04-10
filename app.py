@@ -87,7 +87,7 @@ def pretext():
             log_stream.truncate(0)
             return response, 422  # 422 Unprocessable Content https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/422
         # return the generated HTML file
-        return (temp_dir / "output" / "article.html").read_text()
+        return (temp_dir / "output" / "output.html").read_text()
 
 
 @app.route("/prefigure/", methods=["GET", "POST"])
