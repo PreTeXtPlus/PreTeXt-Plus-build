@@ -49,6 +49,8 @@ def pretext():
             """
             return render_template("api.html", token=TOKEN, source=source, title=title)
         return "PreTeXt.Plus Build API"
+
+    # Otherwise, request.method == "POST"
     if request.form.get('token') != TOKEN:
         return "Invalid token", 401
     with TemporaryDirectory() as temp_dir_name:
@@ -59,6 +61,7 @@ def pretext():
         if re.match(r"<pretext\b", source.lstrip()):
             # use source as-is
             assembled_source = source
+            output_label = request.form.get('output_label') or "article"
         else:
             # assemble source from template
             assembled_source = render_template(
@@ -66,6 +69,7 @@ def pretext():
                 source=source,
                 title=request.form.get('title'),
             )
+            output_label = "output"
         # write source to file temp_dir/source.ptx
         (temp_dir/"source.ptx").write_text(assembled_source)
         # write publication to file temp_dir/publication.ptx
@@ -87,7 +91,7 @@ def pretext():
             log_stream.truncate(0)
             return response, 422  # 422 Unprocessable Content https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/422
         # return the generated HTML file
-        return (temp_dir / "output" / "output.html").read_text()
+        return (temp_dir / "output" / f"{output_label}.html").read_text()
 
 
 @app.route("/prefigure/", methods=["GET", "POST"])
