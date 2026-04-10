@@ -1,1 +1,1 @@
-<pretext><docinfo><brandlogo source="icon.svg" /></docinfo><article label="article"><title>{{title}}</title>{{source}}</article></pretext>
+<pretext><docinfo><brandlogo source="icon.svg" /></docinfo><article label="output"><title>{{title}}</title>{{source}}</article></pretext>
