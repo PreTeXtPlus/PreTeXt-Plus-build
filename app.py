@@ -9,6 +9,7 @@ from tempfile import TemporaryDirectory
 from os import environ
 from flask import Flask, render_template, request, send_file, make_response
 from flask_cors import CORS
+from lxml import etree
 import prefig
 from pretext.project import Project
 from pretext.logger import get_log_error_flush_handler
@@ -23,6 +24,25 @@ log.addHandler(log_handler)
 
 # get token from environment
 TOKEN = environ.get("BUILD_TOKEN")
+
+_XML_PARSER = etree.XMLParser(
+    resolve_entities=False, load_dtd=False, no_network=True, dtd_validation=False, huge_tree=False
+)
+
+def root_label(source:str):
+    # the build names the output file after this label, so we must know it ahead of time
+    try:
+        root = etree.fromstring(source.encode(), parser=_XML_PARSER)
+    except etree.XMLSyntaxError:
+        return None
+    for child in root:
+        if child.tag in ("article", "book", "slideshow"):
+            if "label" in child.attrib:
+                return child.get("label")
+            elif "xml:id" in child.attrib:
+                return child.get("xml:id")
+    return None
+
 
 def standalone_target(temp_dir:Path):
     return Project().new_target(
@@ -61,7 +81,7 @@ def pretext():
         if re.match(r"<pretext\b", source.lstrip()):
             # use source as-is
             assembled_source = source
-            output_label = request.form.get('output_label') or "article"
+            output_label = request.form.get('output_label') or root_label(source) or "article"
         else:
             # assemble source from template
             assembled_source = render_template(
@@ -91,7 +111,22 @@ def pretext():
             log_stream.truncate(0)
             return response, 422  # 422 Unprocessable Content https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/422
         # return the generated HTML file
-        return (temp_dir / "output" / f"{output_label}.html").read_text()
+        output_path = temp_dir / "output" / f"{output_label}.html"
+        try:
+            return output_path.read_text()
+        except FileNotFoundError:
+            produced = sorted(f.name for f in (temp_dir / "output").glob("*.html"))
+            response = f"""
+<h2>Expected output file "{html.escape(output_path.name)}" was not found.</h2>
+<p>The build succeeded, but no file matched the output_label "{html.escape(output_label)}".
+This usually means the source's &lt;article&gt;, &lt;book&gt;, or &lt;slideshow&gt;
+element doesn't carry a matching label attribute.</p>
+<h3>Files produced by the build:</h3>
+<pre>
+{html.escape(", ".join(produced) or "(none)")}
+</pre>
+            """
+            return response, 500
 
 
 @app.route("/prefigure/", methods=["GET", "POST"])
