@@ -1,6 +1,6 @@
 
 import logging
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 import re
 import shutil
@@ -54,6 +54,16 @@ def standalone_target(temp_dir:Path):
         output_dir=temp_dir/"output",
     )
 
+def zipped_target(temp_dir:Path):
+    return Project().new_target(
+        name="zipped",
+        format="html",
+        compression="zip",
+        source=temp_dir/"source.ptx",
+        publication=temp_dir/"publication.ptx",
+        output_dir=temp_dir/"output",
+    )
+
 @app.route("/external/icon.svg")
 def icon_svg():
     return send_file("icon.svg")
@@ -65,7 +75,14 @@ def pretext():
         if environ.get("DEVELOPMENT") == "true":
             title = r"Hello world! Goodbye <m>\LaTeX</m>!"
             source = """
-<p>This is math: <m>x^2</m>.</p>
+<pretext>
+<article xml:id="article">
+<title>My Article</title>
+<introduction><p>Hello world.</p></introduction>
+<section><title>Section First</title><p>Heya.</p></section>
+<section><title>Second Section</title><p>Goodbye.</p></section>
+</article>
+</pretext>
             """
             return render_template("api.html", token=TOKEN, source=source, title=title)
         return "PreTeXt.Plus Build API"
@@ -93,12 +110,21 @@ def pretext():
         # write source to file temp_dir/source.ptx
         (temp_dir/"source.ptx").write_text(assembled_source)
         # write publication to file temp_dir/publication.ptx
+        if request.form.get("format") == "zip":
+            chunking = "1"
+            portable = "no"
+        else:
+            chunking = "0"
+            portable = "yes"
         (temp_dir/"publication.ptx").write_text(render_template(
-            "publication.ptx",
+            "publication.ptx",chunking=chunking,portable=portable
         ))
-        # build standalone target
+        # build appropriate target
         try:
-            standalone_target(temp_dir).build()
+            if request.form.get('format') == 'zip':
+                zipped_target(temp_dir).build()
+            else:
+                standalone_target(temp_dir).build()
         except Exception as e:
             response = f"""
 <h2>{e}</h2>
@@ -110,8 +136,14 @@ def pretext():
             log_stream.seek(0)
             log_stream.truncate(0)
             return response, 422  # 422 Unprocessable Content https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/422
-        # return the generated HTML file
-        output_path = temp_dir / "output" / f"{output_label}.html"
+        # return ZIP of all build files or just the HTML file
+        output_dir = temp_dir / "output"
+        if request.form.get('format') == 'zip':
+            # PreTeXt-CLI names the zip after the source file: source.ptx -> source.zip
+            zip_path = output_dir / "source.zip"
+            buf = BytesIO(zip_path.read_bytes())
+            return send_file(buf, mimetype='application/zip', download_name='output.zip', as_attachment=True)
+        output_path = output_dir / f"{output_label}.html"
         try:
             return output_path.read_text()
         except FileNotFoundError:
