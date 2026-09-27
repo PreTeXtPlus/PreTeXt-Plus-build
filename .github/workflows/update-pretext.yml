@@ -1,0 +1,111 @@
+name: Update PreTeXt CLI
+
+# Pins `pretext` in requirements.txt to a PreTeXt CLI release, smoke-tests the
+# API against it, and pushes the pin to main so the next deploy runs that CLI.
+#
+# Triggered by pretext-cli's deploy-stable workflow after each stable release
+# (repository_dispatch "pretext-cli-release", payload {version}), or by hand.
+#
+# Pushes with secrets.PRETEXT_UPDATE_TOKEN when set (needed if main is
+# protected, or if other workflows should run on the push), else GITHUB_TOKEN.
+on:
+  repository_dispatch:
+    types: [pretext-cli-release]
+  workflow_dispatch:
+    inputs:
+      pretext_version:
+        description: "PreTeXt CLI version to pin (e.g. 2.54.0). Blank = latest on PyPI."
+        required: false
+        default: ""
+
+concurrency:
+  group: update-pretext
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.PRETEXT_UPDATE_TOKEN || github.token }}
+
+      - name: Resolve PreTeXt CLI version
+        id: cli
+        env:
+          VERSION: ${{ github.event.client_payload.version || inputs.pretext_version }}
+        run: |
+          if [ -z "$VERSION" ]; then
+            VERSION=$(curl -fsSL https://pypi.org/pypi/pretext/json | jq -r .info.version)
+          fi
+          VERSION="${VERSION#v}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Not a stable PreTeXt CLI version: '$VERSION'"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Pin pretext in requirements.txt
+        id: pin
+        env:
+          VERSION: ${{ steps.cli.outputs.version }}
+        run: |
+          sed -i -E "s/^pretext([^a-zA-Z0-9_-].*)?$/pretext==$VERSION/" requirements.txt
+          grep -qx "pretext==$VERSION" requirements.txt || { echo "::error::No pretext line in requirements.txt"; exit 1; }
+          if git diff --quiet requirements.txt; then
+            echo "Already pinned to pretext==$VERSION."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Builds fetch Runestone Services info from the html-static release
+      # matching the CLI's major.minor, which the CLI release triggers but
+      # which takes a while to reach jsDelivr.
+      - name: Wait for html-static
+        if: steps.pin.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.cli.outputs.version }}
+        run: |
+          url="https://cdn.jsdelivr.net/gh/pretextbook/html-static@${VERSION%.*}/dist/_static/runestone_services.xml"
+          for attempt in $(seq 1 45); do
+            if curl -fsS -o /dev/null "$url"; then
+              echo "html-static ${VERSION%.*} is available"
+              exit 0
+            fi
+            echo "Attempt $attempt: $url not served yet; retrying in 2 minutes"
+            sleep 120
+          done
+          echo "::error::html-static ${VERSION%.*} never appeared at $url"
+          exit 1
+
+      - uses: actions/setup-python@v5
+        if: steps.pin.outputs.changed == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        if: steps.pin.outputs.changed == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get -y install libcairo2-dev
+          pip install -r requirements.txt
+
+      - name: Smoke test
+        if: steps.pin.outputs.changed == 'true'
+        run: python scripts/smoke_test.py
+
+      - name: Commit and push
+        if: steps.pin.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.cli.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898208+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(deps): pin pretext to $VERSION"
+          git push origin HEAD:main
