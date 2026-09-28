@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
           token: ${{ secrets.PRETEXT_UPDATE_TOKEN || github.token }}
@@ -84,7 +84,7 @@ jobs:
           echo "::error::html-static ${VERSION%.*} never appeared at $url"
           exit 1
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: steps.pin.outputs.changed == 'true'
         with:
           python-version: "3.12"
