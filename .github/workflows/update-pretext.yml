@@ -1,13 +1,14 @@
 name: Update PreTeXt CLI
 
 # Pins `pretext` in requirements.txt to a PreTeXt CLI release, smoke-tests the
-# API against it, and pushes the pin to main so the next deploy runs that CLI.
+# API against it, and merges the pin into main through a pull request so the
+# next deploy runs that CLI.
 #
 # Triggered by pretext-cli's deploy-stable workflow after each stable release
 # (repository_dispatch "pretext-cli-release", payload {version}), or by hand.
 #
-# Pushes with secrets.PRETEXT_UPDATE_TOKEN when set (needed if main is
-# protected, or if other workflows should run on the push), else GITHUB_TOKEN.
+# Opens and merges the PR with secrets.PRETEXT_UPDATE_TOKEN when set (so the
+# merge can trigger other workflows), else GITHUB_TOKEN.
 on:
   repository_dispatch:
     types: [pretext-cli-release]
@@ -24,6 +25,7 @@ concurrency:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   update:
@@ -100,12 +102,22 @@ jobs:
         if: steps.pin.outputs.changed == 'true'
         run: python scripts/smoke_test.py
 
-      - name: Commit and push
+      # main only accepts changes through a pull request, so open one for the
+      # pin and merge it straight away.
+      - name: Open and merge pull request
         if: steps.pin.outputs.changed == 'true'
         env:
           VERSION: ${{ steps.cli.outputs.version }}
+          GH_TOKEN: ${{ secrets.PRETEXT_UPDATE_TOKEN || github.token }}
         run: |
+          branch="update-pretext/$VERSION"
           git config user.name "github-actions[bot]"
           git config user.email "41898208+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
           git commit -am "chore(deps): pin pretext to $VERSION"
-          git push origin HEAD:main
+          git push --force origin "$branch"
+          gh pr view "$branch" --json state --jq .state 2>/dev/null | grep -qx OPEN \
+            || gh pr create --base main --head "$branch" \
+                 --title "chore(deps): pin pretext to $VERSION" \
+                 --body "Automated pin to PreTeXt CLI $VERSION. Smoke test passed."
+          gh pr merge "$branch" --squash --delete-branch
